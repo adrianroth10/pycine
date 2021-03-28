@@ -1,5 +1,9 @@
+import logging
+
 import cv2
 import numpy as np
+
+logger = logging.getLogger()
 
 
 def color_pipeline(raw, setup, bpp=12):
@@ -7,7 +11,7 @@ def color_pipeline(raw, setup, bpp=12):
     http://www.visionresearch.com/phantomzone/viewtopic.php?f=20&t=572#p3884
     """
     # 1. Offset the raw image by the amount in flare
-    print("fFlare: ", setup.fFlare)
+    logger.debug("fFlare: {}".format(setup.fFlare))
 
     # 2. White balance the raw picture using the white balance component of cmatrix
     BayerPatterns = {3: "gbrg", 4: "rggb"}

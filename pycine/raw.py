@@ -9,31 +9,91 @@ from pycine.linLUT import linLUT
 logger = logging.getLogger()
 
 
-def frame_reader(cine_file, header, start_frame=1, count=None):
-    frame = start_frame
-    if not count:
-        count = header["cinefileheader"].ImageCount
+class Frame_reader:
+    def __init__(self, cine_file, header=None, start_index=0, count=None, post_processing=None):
+        """
+        Create an object for reading frames from a cine file. It can either be used to get specific frames with __getitem__ or as an iterator.
 
-    with open(cine_file, "rb") as f:
-        while count:
-            frame_index = frame - 1
-            logger.debug("Reading frame {}".format(frame))
+        Parameters
+        ----------
+        cine_file : str or file-like object
+            A string containing a path to a cine file
+        header : dict (optional)
+            A dictionary contains header information of the cine file
+        start_index : int
+            First image in a pile of images in cine file. Only used with the iterator in the object.
+        count : int
+            Maximum number of frames to get if this object is used as an iterator.
+        post_processing : function
+            Function that takes one image parameter and returns a new processed image
+            If provided this function will be applied to the raw image before returning.
 
-            f.seek(header["pImage"][frame_index])
+        Returns
+        -------
+        the created object
+        """
+        self.cine_file = cine_file
+        self.cine_file_stream = open(cine_file, "rb")
+        self.post_processing = post_processing
 
-            annotation_size = struct.unpack("I", f.read(4))[0]
-            annotation = struct.unpack("{}B".format(annotation_size - 8), f.read((annotation_size - 8) // 8))
-            header["Annotation"] = annotation
+        if header is None:
+            header = read_header(cine_file)
+        self.header = header
 
-            image_size = struct.unpack("I", f.read(4))[0]
+        self.start_index = start_index
+        self.frame_index = self.start_index
 
-            data = f.read(image_size)
+        self.full_size = self.header["cinefileheader"].ImageCount
+        if not count:
+            count = self.full_size - self.start_index
+        self.end_index = self.start_index + count
+        if self.end_index > self.full_size:
+            raise ValueError("end_index {} is larger than the maximum {}".format(self.end_index, self.full_size))
+        self.size = count
 
-            raw_image = create_raw_array(data, header)
+    def __getitem__(self, frame_index):
+        """
+        Dunder method to be able to use [] for retrieving images from the object.
 
-            yield raw_image
-            frame += 1
-            count -= 1
+        Parameters
+        ----------
+        frame_index : int
+            the index for the image in cine file to retrieve.
+        """
+        f = self.cine_file_stream
+        f.seek(self.header["pImage"][frame_index])
+
+        annotation_size = struct.unpack("I", f.read(4))[0]
+        annotation = struct.unpack("{}B".format(annotation_size - 8), f.read((annotation_size - 8) // 8))
+        self.header["Annotation"] = annotation
+
+        image_size = struct.unpack("I", f.read(4))[0]
+        data = f.read(image_size)
+        image = create_raw_array(data, self.header)
+        if not self.post_processing is None:
+            image = self.post_processing(image)
+        return image
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self.frame_index >= self.end_index:
+            raise StopIteration
+        logger.debug("Reading frame {}".format(self.frame_index))
+        raw_image = self.__getitem__(self.frame_index)
+        self.frame_index += 1
+        return raw_image
+
+    def __len__(self):
+        return self.size
+
+    def __del__(self):
+        self.cine_file_stream.close()
+
+
+def frame_reader(cine_file, header=None, start_frame=1, count=None):
+    return Frame_reader(cine_file, header, start_frame - 1, count)
 
 
 def read_bpp(header):
